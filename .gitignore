@@ -1,3 +1,16 @@
 .venv/
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
+
+# Kaggle API credentials: never commit these
+kaggle.json
+access_token
+.env
+
+# Downloaded datasets (the folder itself is kept via .gitkeep)
+data/*
+!data/.gitkeep
+
+# Machine-specific path to the kagglehub cache
+data_path.txt
