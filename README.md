@@ -4,11 +4,6 @@
 
 A decision-support tool that compares a classical OpenCV preprocessing pipeline with CNN and Vision Transformer (ViT) models on a retinal image classification task. It then uses the measured results to recommend an architecture.
 
-- **Assignment type:** Vibe Code (built with Claude Code)
-- **Course learning outcomes:** CLO1, CLO3
-- **Points:** 100
-- **Due:** September 14, 2026, 11:59 PM
-
 ## Scenario
 
 A medical imaging startup is starting a new retinal scan classification task. As the team's junior computer vision engineer, the engineering manager has asked for a lightweight tool to quickly compare classical OpenCV-based pipelines against CNN and Vision Transformer architectures. The final recommendation has to account for the startup's data volume and deployment constraints.
@@ -78,7 +73,6 @@ The dataset must be found and loaded independently. Course-provided datasets may
 
 - **Contents:** 3,662 retinal fundus photographs saved as 224×224 RGB PNG files (239 MB), plus `train.csv` with `id_code` and `diagnosis` columns.
 - **Origin:** The image count and CSV columns match the APTOS 2019 Blindness Detection training set. This dataset appears to be a resized copy of it.
-- **License:** _TBD. Check the dataset's Kaggle page._
 - **Labels:** 5 diabetic retinopathy grades. Each image's folder name agrees with its CSV label.
 
 | `diagnosis` | Folder | Images |
@@ -145,29 +139,6 @@ _Latency measurement settings (device, batch size, warm-up runs, number of timed
 ## Architecture recommendation
 
 _TBD. Write this once results are in. Base the choice on the measured numbers above, and name the data-volume and deployment constraints that drive it._
-
-## Deliverables
-
-- **Notebook:** a working Jupyter notebook that outputs the comparison table.
-- **Video:** an 8–12 minute (12 minutes maximum) camera-on screen recording of the full Claude Code session.
-  - Show both the Claude Code terminal and the Jupyter Notebook window.
-  - Keep your face on camera for the whole video. Picture-in-picture is fine; voice-over slides are not.
-  - Walk through the tool and justify the architecture recommendation.
-  - Explain in your own words. An outline or speaker notes are fine; reading a script word for word is not.
-  - Make sure narration is clear. MP4 is preferred; MOV and WebM are accepted.
-  - Submit through the LMS assignment dropbox.
-
-## Grading rubric
-
-There are five criteria worth 20 points each (100 total). The table lists what earns full marks. Lower tiers are Proficient (17), Developing (14), and Beginning (10).
-
-| Criterion | CLO | Exemplary (20 pts) |
-|---|---|---|
-| Pipeline implementation correctness | CLO1 | Runs end to end with correct color-space handling, and every operation is applied in a defensible order. |
-| Architecture comparison rigor | CLO1 | CNN and ViT are compared on matched data, and accuracy, latency, and parameter counts are all measured rather than asserted. |
-| Justified architecture recommendation | CLO1 | The recommendation follows from the measured evidence and names the data-volume and deployment constraints behind it. |
-| Claude Code workflow and iteration | CLO1 | The video shows genuine iterative prompting, critical reading of the agent's output, and corrections when it is wrong. |
-| Evaluation protocol integrity | CLO3 | The split is leakage-free, with a precise explanation of why the preprocessing order preserves integrity. |
 
 ## Built with
 
