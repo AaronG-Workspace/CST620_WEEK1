@@ -18,7 +18,19 @@ A medical imaging startup is starting a new retinal scan classification task. As
 
    It must handle color spaces correctly. OpenCV loads images as BGR, while PIL and torchvision return RGB.
 
-   **Operation order and parameters:** _TBD. Document the chosen order and why each step comes where it does._
+   **Operation order and parameters.** All settings live in one dictionary, `PIPELINE_CONFIG`, in [`src/preprocess.py`](src/preprocess.py).
+
+   | Step | Operation | Settings | Why it comes here |
+   |---|---|---|---|
+   | 1 | Grayscale | `cv2.COLOR_BGR2GRAY` | `cv2.imread` returns BGR, so the BGR conversion code is required. |
+   | 2 | CLAHE | clip limit 2.0, 8×8 tiles | Boosts local contrast so faint vessels and lesions stand out. |
+   | 3 | Gaussian blur | 5×5 kernel, sigma derived from kernel size | Smooths the noise CLAHE amplifies, which Canny would otherwise mark as edges. |
+   | 4 | Canny edges | low 40, high 120 | Runs on the smoothed, contrast-enhanced image. |
+   | 5 | Morphological closing | 3×3 kernel | Bridges 1-pixel gaps in the edge lines. |
+
+   **Canny thresholds** were chosen by measuring gradient strength inside the fundus circle on 200 training images after CLAHE and blur. The low threshold (40) is just above the 75th percentile, so background texture is ignored. The high threshold (120) is between the 95th and 98th percentiles, so edges only start at strong boundaries: vessels, the optic disc, lesions, and the image rim. The 1:3 ratio is within Canny's recommended range of 1:2 to 1:3.
+
+   **Model input.** The CLAHE image is copied to 3 channels, resized to 224×224, scaled to 0–1, and normalized with the training split's mean (0.312) and standard deviation (0.191). The blur, Canny, and closing stages are shown in the notebook for inspection; the models don't use them.
 
 2. **Comparison notebook.** A Jupyter notebook that:
    - loads a publicly available medical or natural image dataset from Kaggle or TensorFlow Datasets
@@ -31,14 +43,20 @@ A medical imaging startup is starting a new retinal scan classification task. As
 
 ```
 cst620_week1/
-├── config/      # configuration (pipeline and training parameters)
-├── data/        # optional local data files (ignored by git)
-├── src/         # OpenCV preprocessing pipeline and model code
-├── tests/       # tests
+├── comparison.ipynb    # data prep, pipeline stages, training, comparison table
+├── config/             # reserved for configuration files (empty for now)
+├── data/               # optional local data files (ignored by git)
+├── src/
+│   ├── data.py         # loading, duplicate removal, binary labels, stratified split
+│   ├── preprocess.py   # OpenCV pipeline and PyTorch Dataset
+│   ├── models.py       # small CNN and DeiT-tiny
+│   ├── training.py     # training loop and frozen-feature extraction
+│   └── benchmark.py    # test metrics, model size, CPU latency
+├── tests/              # tests (none yet)
 └── README.md
 ```
 
-The dataset is stored in the kagglehub cache, not in the project folder (see [Loading](#loading)). The comparison notebook will be added as the project is built.
+The dataset is stored in the kagglehub cache, not in the project folder (see [Loading](#loading)). Run `comparison.ipynb` from top to bottom. A full run takes about 11 minutes on the development machine's CPU.
 
 ## Setup
 
@@ -83,7 +101,7 @@ The dataset must be found and loaded independently. Course-provided datasets may
 | 3 | `Severe` | 193 |
 | 4 | `Proliferate_DR` | 295 |
 
-**Label mapping for this project:** _TBD. Either 5-class, or binary (No DR vs. DR)._
+**Label mapping for this project:** binary. Grade 0 is No DR (label 0), and grades 1–4 are DR (label 1). After duplicate removal, there are 1,796 No DR images (51.3%) and 1,708 DR images (48.7%).
 
 **Why this dataset:** The assignment suggests `retinopathy_detection`, whose TFDS catalog name is `diabetic_retinopathy_detection`. That dataset requires a manual download of the Kaggle Diabetic Retinopathy Detection competition files, and its full-resolution version is about 89 GiB. This dataset is public, 239 MB, and downloads directly through the Kaggle API.
 
@@ -112,33 +130,48 @@ These checks were run on the downloaded files (version 4):
 - **No patient IDs.** Each `id_code` identifies an image, not a patient, so images can't be grouped by patient.
 - **Class imbalance.** 49.3% of images are `No_DR`. A 5-class model that always predicts `No_DR` would score about 49% accuracy.
 
-**Planned duplicate handling (not yet implemented):** Before splitting, keep one copy from each group whose copies share a label, and remove every group whose copies disagree. This removes 158 files and leaves 3,504 unique, consistently labeled images. These counts use the 5-class labels. If the project switches to binary labels, fewer groups will disagree, so the check needs to be re-run.
+**Duplicate handling** ([`src/data.py`](src/data.py)): Before splitting, files are grouped by MD5 hash. Each group whose copies share a grade keeps one copy, and each group whose copies disagree is removed. This removes 158 files and leaves 3,504 unique, consistently labeled images. Disagreement is judged on the 0–4 grades, not the binary labels, so a group graded 1 and 2 is removed even though both copies are DR. This is the stricter choice.
 
 ## Evaluation protocol
 
 These steps, in this order, keep the evaluation leakage-free:
 
 1. **Remove duplicates before splitting.** This has to come first. After a split, copies of the same image could already be in different splits. The step compares file hashes and labels; no statistics are fitted.
-2. **Stratified train / validation / test split** (e.g., 70/15/15) with a fixed random seed, so each split keeps the same class proportions. The smallest class (`Severe`) has fewer than 200 images, so a purely random split could leave very few in the test set.
+2. **Stratified train / validation / test split** (70/15/15, seed 42), so each split keeps the same class proportions. The result is 2,454 / 525 / 525 images, with 48.7–48.8% DR in each split. The notebook checks that no image ID or file hash appears in more than one split.
 3. **Per-image OpenCV preprocessing.** Each OpenCV operation uses only the image it is processing, so no information passes between splits.
-4. **Fit on training data only.** Any parameter learned from data (e.g., normalization mean and standard deviation) is computed on the training split and applied unchanged to validation and test. Fixed values, such as the ImageNet statistics used with a pretrained ViT, don't leak either.
+4. **Fit on training data only.** Any parameter learned from data (e.g., normalization mean and standard deviation) is computed on the training split and applied unchanged to validation and test. Both models, including the pretrained DeiT-tiny, use the training split's statistics instead of ImageNet statistics, so they receive identical inputs.
 5. **Test once.** Choose models with the validation split. The test split is used only for the final reported metrics.
 
 Every model uses the same splits and the same preprocessing (matched data). Accuracy, parameter count, and latency all come from this project's own runs, not from published numbers.
 
 ## Results
 
-| Model | Family | Test accuracy | Parameters | Mean inference latency (ms) |
-|---|---|---|---|---|
-| Majority-class baseline (always predicts the most common class) | — | — | — | — |
-| _TBD_ (small CNN) | CNN | — | — | — |
-| _TBD_ (e.g., DeiT-tiny) | ViT | — | — | — |
+Measured by [`comparison.ipynb`](comparison.ipynb) on the test split (525 images, 256 with DR), which was used once.
 
-_Latency measurement settings (device, batch size, warm-up runs, number of timed runs): TBD._
+| Model | Family | Test accuracy | Sensitivity (DR recall) | Parameters | Size (MB) | CPU latency, batch of 32 (ms) |
+|---|---|---|---|---|---|---|
+| Majority-class baseline (always predicts the most common training label) | — | 0.512 | 0.000 | 0 | 0.00 | — |
+| Small CNN (3 conv layers, trained from scratch) | CNN | 0.886 | 0.906 | 32,162 | 0.13 | 275.9 ± 35.9 |
+| DeiT-tiny (`deit_tiny_patch16_224`, frozen pretrained backbone, trained head) | ViT | 0.966 | 0.945 | 5,524,802 | 21.13 | 1138.2 ± 97.6 |
+
+**Training settings:** CPU, batch size 32, `num_workers=0`, Adam (learning rate 0.001), cross-entropy loss. The small CNN trained for 5 epochs. For DeiT-tiny, the frozen backbone's features were computed once, and only the head (386 parameters) trained for 20 epochs. Each model keeps the epoch with the best validation accuracy: epoch 5 for both (small CNN 0.890, DeiT-tiny 0.960).
+
+**Latency settings:** the development machine's Intel CPU (Intel64 Family 6 Model 170) with 12 PyTorch threads; one batch of 32 test images; eval mode with no gradients; 3 warm-up runs, then the mean ± standard deviation of 10 timed runs. DeiT-tiny is timed as the full model on images, not on cached features. Times cover the model's forward pass only, not image loading or OpenCV preprocessing. Size is the saved `state_dict`, where 1 MB = 1024² bytes.
 
 ## Architecture recommendation
 
-_TBD. Write this once results are in. Base the choice on the measured numbers above, and name the data-volume and deployment constraints that drive it._
+**Recommendation: DeiT-tiny with a frozen backbone**, for a startup with about 3,500 images and CPU-only clinic computers.
+
+- **Best accuracy.** Test accuracy is 0.966, vs. 0.886 for the small CNN and 0.512 for the majority-class baseline.
+- **Fewer missed DR cases**, which is the costliest error in screening. Sensitivity is 0.945 vs. 0.906 for the CNN: a 5.5% miss rate vs. 9.4%.
+- **Workable CPU speed.** A batch of 32 takes 1138.2 ± 97.6 ms, about 36 ms per image, so even a full batch finishes in about a second.
+- **Size isn't a barrier.** Its 5,524,802 parameters take 21.13 MB, which fits easily on a clinic computer. With about 3,500 images, the from-scratch CNN (32,162 parameters) still scored 8 points lower in accuracy.
+- **Keep the small CNN as a backup for very slow machines.** It's about 4× faster (275.9 ± 35.9 ms per batch) and only 0.13 MB, but gives up accuracy (0.886) and sensitivity (0.906). Time both models on an actual clinic computer before deciding.
+
+### Why this comparison could be misleading
+
+1. **It's not a fair CNN-vs-ViT contest.** DeiT-tiny started from ImageNet pretraining, while the CNN learned from scratch. The CNN also got only 5 epochs and was still improving; its best epoch was the last one. So the 8-point gap mixes the architecture with pretraining and training time. A fair match would be a pretrained CNN (e.g., ResNet-18) with the same frozen-backbone setup.
+2. **A single small test set makes some gaps look more certain than they are.** The test set has 525 images (256 with DR), from one split and one seed. Rough 95% confidence intervals overlap for sensitivity (DeiT-tiny 0.92–0.97, CNN 0.87–0.94), so DeiT-tiny's sensitivity advantage may be partly noise. A paired test on the same test images (McNemar's) would settle it. The accuracy intervals don't overlap (0.95–0.98 vs. 0.86–0.91), so that gap is more reliable.
 
 ## Built with
 
